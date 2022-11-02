@@ -1,0 +1,157 @@
+name: CI/CD for Azure Synapse Link for SQL Server 2022
+
+# Sample of a complete CI/CD experience for Azure Synapse Link for SQL Server 2022 using GitHub Actions
+# You can use a self-hosted runner installed locally for this to work
+# You can also use a GitHub-hosted runner
+
+# For this pipeline you also need to setup the below secrets
+  # AZURE_CREDENTIALS - The credentials for your service principal 
+    # Guide for that can be found at https://github.com/Azure/login/?WT.mc_id=DP-MVP-5004032
+  # WORKSPACENAME - Name of your Azure Synapse workspace
+  # LINKNAME - Name of the link for Azure Synapse Link for SQL Server 2022
+    # try and keep this secret
+  # SQL_SERVER - Name of your SQL Server
+  # SQL_CONNECTION_STRING - The connection string for your SQL Server database
+
+#Sets the trigger to update when update there is a pull request on the main branch
+on:
+  pull_request:
+    types:
+      - closed
+    branches:
+      - main
+
+jobs:
+
+  # Job to stop Azure Synapse Link for SQL Server 2022
+  StopLink:
+    # Easier to use Github-hosted runner to stop Azure Synapse
+    runs-on: self-hosted
+    # Alternatively can use a GitHub-Hosted agent instead of your own runner
+    # runs-on: windows-latest
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      # Run migration-based scripts
+      - name: Install Azure Synapse Module
+        run: 'Install-Module -Name Az.Synapse -Force'
+
+      - name: Login via Az module
+        uses: azure/login@v1
+        with:
+          creds: ${{secrets.AZURE_CREDENTIALS}}
+          enable-AzPSSession: true 
+
+      - name: Stop Azure Synapse Link
+        uses: azure/powershell@v1
+        with:
+          inlineScript: |
+            Stop-AzSynapseLinkConnection -WorkspaceName ${{secrets.WORKSPACENAME}} -Name ${{secrets.LINKNAME}}
+          
+            $status = Get-AzSynapseLinkConnectionDetailedStatus -WorkspaceName ${{secrets.WORKSPACENAME}} -Name ${{secrets.LINKNAME}}
+
+            do{
+              $status = Get-AzSynapseLinkConnectionDetailedStatus -WorkspaceName ${{secrets.WORKSPACENAME}} -Name ${{secrets.LINKNAME}}
+
+              Start-Sleep -Seconds 20
+            } Until ($status.Status -eq "Stopped")
+          azPSVersion: "latest"
+
+  # Job to build SQL Server 2022 dacpac
+  CreateDacpac:
+  # Set the dependency for job to stop the link
+    needs: StopLink
+    # Recommend use self-hosted runner
+    runs-on: self-hosted
+
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      # Note that I am using latest version of action
+      - uses: actions/checkout@v3 
+      
+      - name: Login via Az module
+        uses: azure/login@v1
+        with:
+          creds: ${{secrets.AZURE_CREDENTIALS}}
+          enable-AzPSSession: true 
+
+      # Find latest version of msbuild on runner
+      - name: Add msbuild to PATH
+        uses: microsoft/setup-msbuild@v1.1
+
+      # create dacpac using MSBUILD
+      - name: Build Database project
+        run: |
+          msbuild.exe WideWorldImportersDBProject.sqlproj /p:Configuration=Release
+
+      # Publish artifact
+      - uses: actions/upload-artifact@v3.0.0
+        with:
+          name: SQLDB
+          path: ${{ github.workspace }}/bin/Release/ 
+
+  # Deploy dacpac job
+  DeployDacpac:
+    # Set the dependency for the build job
+    needs: CreateDacpac
+    # Easier to use Github-hosted runner if updating in GitHub
+    runs-on: self-hosted
+
+    # Steps to deploy the updates to Azure SQL Database
+    # To keep this example simple, the Firewall settings in the logical SQL Server allows access from Azure services and resources
+    # An alternative is to use the Azure Login GitHub Action https://github.com/marketplace/actions/azure-login
+    steps:
+      - name: download artifact containing dacpac
+        # Dowloads Data artifact to dacpac folder
+        uses: actions/download-artifact@v3.0.0
+        with:
+          name: SQLDB
+
+      # Installs dacpac
+      # For this to work you have a secret specified, default in my repo are blank
+      # Another called AZURESQLDB_CONNECTION_STRING which contains connection string to your Azure SQL Database
+      - name: SQL DB Deploy
+        uses: Azure/sql-action@v1.3
+        with:
+          # The SQL Server name
+          server-name: '${{ secrets.SQL_SERVER }}'
+          # The connection string, including authentication information, for the SQL Database.
+          connection-string: '${{ secrets.SQL_CONNECTION_STRING }}'
+          # Name of the dacpac file in the artifact
+          dacpac-package: 'WideWorldImportersDBProject.dacpac'
+
+  # Job to stop Azure Synapse Link for SQL Server 2022
+  StartLink:
+    # Set the dependency for the deployment job
+    needs: DeployDacpac
+    # Easier to use Github-hosted runner to stop Azure Synapse
+    runs-on: self-hosted
+    # Alternatively can use a GitHub-Hosted agent instead of your own runner
+    # runs-on: windows-latest
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      # Run migration-based scripts
+      - name: Install Azure Synapse Module
+        run: 'Install-Module -Name Az.Synapse -Force'
+
+      - name: Login via Az module
+        uses: azure/login@v1
+        with:
+          creds: ${{secrets.AZURE_CREDENTIALS}}
+          enable-AzPSSession: true 
+
+      - name: Stop Azure Synapse Link
+        uses: azure/powershell@v1
+        with:
+          inlineScript: |
+            Start-AzSynapseLinkConnection -WorkspaceName ${{secrets.WORKSPACENAME}} -Name ${{secrets.LINKNAME}}
+          
+            $status = Get-AzSynapseLinkConnectionDetailedStatus -WorkspaceName ${{secrets.WORKSPACENAME}} -Name ${{secrets.LINKNAME}}
+
+            do{
+              $status = Get-AzSynapseLinkConnectionDetailedStatus -WorkspaceName ${{secrets.WORKSPACENAME}} -Name ${{secrets.LINKNAME}}
+
+              Start-Sleep -Seconds 20
+            } Until ($status.Status -eq "Running")
+          azPSVersion: "latest"
