@@ -15,8 +15,4 @@ You can find the recommended secrets inside the YAML file. However, I will add t
   SQL_SERVER - Name of your SQL Server \
   SQL_CONNECTION_STRING - The connection string for your SQL Server database
 
-Avoid putting sensitive information directly into the YAML file (like your connection details). One thing I must stress here is that the password MUST be wrapped in single quotes in the secret for it to work.
-
-You can use the logic in 'Classic Editor' instead by adding the tasks into the GUI and transferring the logic over. Alternatively, you can build an artifact for it using the 'Classic Editor' and use the 'Releases' feature for deployments. Personally, I prefer doing the deployment using a YAML pipeline.
-
 This repository is provided "as is" based on the [MIT license](https://opensource.org/licenses/MIT). Basically, I am not responsible for your use of it.
