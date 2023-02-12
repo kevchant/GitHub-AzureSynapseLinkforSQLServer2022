@@ -18,8 +18,10 @@ on:
   pull_request:
     types:
       - closed
+    # Note that below trigger is set for updates to a 'Feature' branch
+    # Change as required (for example, to a 'main' branch)
     branches:
-      - main
+      - Feature
 
 jobs:
 
